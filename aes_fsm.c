@@ -183,35 +183,32 @@ static void gas_step(aes_fsm_t* f) {
       }
       break;
 
-    case GAS_RUN:
-      aes_hw_set_led(1);
-
-      // Preserve your original “run” behavior regarding Gasventil
-#if AES_GASVALVE_ON_DURING_RUN
-      output_high(Gasventil);
-#else
-      output_low(Gasventil);
-#endif
-
-      // keep other gas outputs as in your original logic: you stopped Zunder/Gassi elsewhere.
-      // Here we keep them on unless you want otherwise; original code did not explicitly shut Zunder here.
-      // To minimize risk, do not force changes except the Gasventil behavior above.
-
-      // If flame feedback says problem, restart ignition window (like your goto erneut)
-      if (!input(Zundubw)) {
-        f->gas_pulse_count = 0;
-        gas_set_state(f, GAS_IGNITION_WINDOW);
-        break;
-      }
-
-      if (stop_cooling()) {
-        aes_hw_gas_outputs_off();
-        gas_set_state(f, GAS_IDLE);
-        break;
-      }
-
+   case GAS_RUN:
+    aes_hw_set_led(1);
+  
+    // Flame assumed established:
+    // - pull-in coil OFF
+    // - igniter OFF (sparking only during re-ignition)
+    // - ignition safety output OFF
+    output_low(Gasventil);
+    output_low(Zunder);
+    output_low(Gassi);
+  
+    // If igniter activity is detected again, restart ignition window
+    if (!input(Zundubw)) {
+      f->gas_pulse_count = 0;
+      gas_set_state(f, GAS_IGNITION_WINDOW);
       break;
+    }
+  
+    if (stop_cooling()) {
+      aes_hw_gas_outputs_off();
+      gas_set_state(f, GAS_IDLE);
+      break;
+    }
+    break;
 
+    
     default:
       aes_hw_gas_outputs_off();
       gas_set_state(f, GAS_IDLE);
