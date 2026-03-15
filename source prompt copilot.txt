@@ -1,0 +1,79 @@
+Refactor the existing CCS C firmware for the PIC16F819-based Dometic AES refrigerator control board to use a non-blocking, continuously-evaluated state machine so it can automatically switch energy sources at runtime and recover from gas ignition failures without requiring a power-cycle.
+
+Repository: lilvince-repo/Dometic-control-board
+Base branch: main
+
+Current behavior problems (from user):
+
+Firmware effectively only changes supply source at startup and/or gets stuck in gas/alarm.
+If 230Vac is interrupted and gas is unavailable (manual valve closed), ignition fails and the firmware enters alarm lockout and never recovers when 230Vac returns.
+If running on gas, and then 230Vac appears, it should switch to 230Vac but currently it tends to stay on gas.
+Similar issue for 12V(D+) appearing after a fault: it should switch to 12V.
+User currently must restart the refrigerator/controller to recover.
+Hardware/inputs clarified by user:
+
+Priority must be: 230Vac > 12V (D+) > Gas.
+Detect230V input is active-low (LOW means 230Vac present).
+Gas may be physically disabled by closing the manual gas valve; ignition will therefore fail.
+On gas ignition failure, system should signal alarm and retry gas after 10 minutes if no better power source is available.
+Keep buzzer/beep so user can hear alarms when no power source works.
+Keep CCS C compiler (minimal hardware risk). Preserve existing pin mapping and signaling behavior unless explicitly improved.
+Add new files for clarity.
+Implementation requirements:
+
+Replace nested blocking while(...) loops for Solar/230V/12V/Gas with a single main control loop that continuously:
+
+Reads inputs (Detect230V, DDetect, Solar if still used) and selects desired mode by priority.
+Updates ADC measurements (voltage + temperature) on a periodic schedule (e.g., 1s) without long blocking delays.
+Applies outputs for the active mode.
+Implement state machines:
+
+Top-level modes: MODE_AC (230V), MODE_12V, MODE_GAS. (Solar input may remain but should be treated as "only when parked"; if retained, Solar must not override D+.)
+Gas sub-state machine must be non-blocking and interruptible immediately when AC or D+ becomes available:
+GAS_IDLE
+GAS_SPARK_CHECK (~3s window to detect ignition feedback)
+GAS_IGNITION_WINDOW (~15s, count ignition events similar to current p logic)
+GAS_RUN (maintain until temp reaches setpoint or better energy appears)
+GAS_FAULT_WAIT (10 minutes cooldown before retry) with periodic alarm signaling (Pulse(55) and beep pattern)
+Preserve the existing 15-minute inhibit before allowing gas after leaving 12V mode (anti-refuel safety), implemented non-blocking via timers.
+Eliminate hard lockouts:
+
+Remove/replace any while(1) infinite loops used for alarm lockout; instead enter GAS_FAULT_WAIT and keep monitoring AC/D+.
+Preserve existing functionality where possible:
+
+Keep UART setpoint selection (characters '1'..'5' mapping to existing ADC setpoints).
+Keep Pulse(55/56/57) output behavior.
+Keep RB interrupt for Lichtschalter controlling Licht.
+Keep buzzer support.
+Improve robustness:
+
+Add simple debouncing / stability checks for Detect230V and DDetect (e.g., stable for N ms) to prevent thrashing.
+Ensure mode transitions safely shut down irrelevant outputs (switching to AC/12V must shut down gas outputs immediately).
+Deliverables:
+
+Update existing source files and add new modules for FSM (e.g., aes_fsm.h/.c, aes_hw.h/.c, aes_config.h). Keep CCS C compatibility.
+Add brief documentation (README or comments) describing the new state machine, timing constants (3s, 15s, 10min retry, 15min inhibit), priorities, and alarm behavior.
+Notes:
+
+Avoid changing output polarities; assume current behavior works on real hardware.
+Ensure gas logic checks AC/D+ frequently and aborts gas attempt immediately if higher-priority power appears.
+The following is the prior conversation context from the user's chat exploration (may be truncated):
+
+User: it is a software to command my camper's refrigerator.It is an old dometic Model, it works with either gas, 12Vdc or 230Vac. It as an AES function.
+This program was written from someone wo make a PCB spare part because we can´t by it anymore from Dometic.
+
+can you analyse it and resume The function and sequence.
+
+Assistant: ## What this firmware is (high level)
+
+This is firmware for a PIC16F819 that implements an “AES” (automatic energy selector) controller for a 3‑way absorption fridge:
+
+Power sources / modes
+
+230Vac mode (runs fridge heater via a relay)
+12Vdc mode (runs DC heater via a relay)
+Gas mode (opens a gas valve + drives an igniter, then monitors flame/ignition feedback)
+Control goal
+
+Maintain a target “coldness” by comparing a measured temperature sensor ADC value against a setpoint ADC value (soll).
+The setpoint is changed via ser...
