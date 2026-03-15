@@ -1,0 +1,6 @@
+Start with 230Vac present → should choose AC, gas off.
+Remove 230Vac, D+ present → should switch to 12V heater, gas off.
+Remove D+, Solar active and battery above threshold → should switch to Solar/12V heater.
+Remove Solar → should go to gas.
+While on gas, bring back 230Vac → must switch immediately to AC and shut gas outputs.
+Close manual gas valve (force ignition fail) with no AC/D+ → should alarm, then wait 10 min, then retry gas (and instantly stop retrying if AC or D+ appears during the wait).
